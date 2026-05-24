@@ -217,8 +217,8 @@ function PlayerPage() {
               levelLoadingMaxRetry: 6,
               levelLoadingRetryDelay: 1000,
               // Bandwidth conservative EWMA upscales
-              abrBandwidthFactor: 0.85,
-              abrBandwidthUpFactor: 0.70,
+              abrBandWidthFactor: 0.85,
+              abrBandWidthUpFactor: 0.70,
             };
           } else {
             hlsConfig = {
