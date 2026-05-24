@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Hls, { HlsConfig } from "hls.js";
+import { useWebSocket } from "../providers";
 
 interface Channel {
   id: string;
@@ -19,6 +20,7 @@ interface Category {
 }
 
 function PlayerPage() {
+  const { channelStatus: wsChannelStatus } = useWebSocket();
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -75,12 +77,18 @@ function PlayerPage() {
 
   const channels: Channel[] = channelsData?.data || [];
 
-  // Filter channels
+  // Real-time channel status mapper
+  const getChannelStatus = (c: Channel) => {
+    return wsChannelStatus[c.id] || c.status;
+  };
+
+  // Filter channels (Only show ONLINE/Live channels)
   const filteredChannels = channels.filter((c) => {
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           c.categoryName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "all" || c.categoryName === selectedCategory;
-    return matchesSearch && matchesCategory;
+    const isOnline = getChannelStatus(c) === "ONLINE";
+    return matchesSearch && matchesCategory && isOnline;
   });
 
   const updateBufferMetrics = () => {
