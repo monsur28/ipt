@@ -1,0 +1,56 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  slug     String    @unique
+  channels Channel[]
+}
+
+model Channel {
+  id            String         @id @default(uuid())
+  name          String
+  logo          String?
+  categoryName  String
+  category      Category       @relation(fields: [categoryName], references: [name])
+  country       String?
+  isLive        Boolean        @default(false)
+  status        String         @default("ONLINE") // ONLINE, OFFLINE
+  viewCount     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  streamSources StreamSource[]
+  healthLogs    HealthLog[]
+}
+
+model StreamSource {
+  id        String   @id @default(uuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  url       String
+  priority  Int      @default(1) // 1 = Primary, 2+ = Backups
+  isActive  Boolean  @default(true)
+}
+
+model Playlist {
+  id            String   @id @default(uuid())
+  name          String
+  sourceUrl     String   @unique
+  lastFetchedAt DateTime @default(now())
+}
+
+model HealthLog {
+  id        String   @id @default(uuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  status    String   // ONLINE, OFFLINE
+  latency   Int      // response time in ms
+  checkedAt DateTime @default(now())
+}
