@@ -212,7 +212,6 @@ function PlayerPage() {
               // Extremely high loading resilience to prevent buffer starvation
               fragLoadingMaxRetry: 8,
               fragLoadingRetryDelay: 1000,
-              fragLoadingMaxRetryDelay: 10000,
               manifestLoadingMaxRetry: 6,
               manifestLoadingRetryDelay: 1000,
               levelLoadingMaxRetry: 6,
@@ -230,7 +229,6 @@ function PlayerPage() {
               backBufferLength: 30,
               fragLoadingMaxRetry: 12,
               fragLoadingRetryDelay: 1500,
-              fragLoadingMaxRetryDelay: 15000,
               manifestLoadingMaxRetry: 8,
               manifestLoadingRetryDelay: 1500,
             };
