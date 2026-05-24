@@ -14,6 +14,7 @@ import { LogService } from './services/log_service';
 
 const server = fastify({
   logger: true,
+  trustProxy: true,
 });
 
 // Register WebSocket plugin

@@ -49,7 +49,7 @@ export class StreamController {
         FFmpegService.decrementViewer(channelId);
       });
 
-      const protocol = req.protocol;
+      const protocol = req.protocol === 'http' && !req.hostname.includes('localhost') && !req.hostname.includes('127.0.0.1') ? 'https' : req.protocol;
       const host = req.hostname;
       const isRemote = localHlsPath.startsWith('http');
       const fullUrl = isRemote ? localHlsPath : `${protocol}://${host}${localHlsPath}`;
