@@ -405,6 +405,34 @@ export default function DashboardPage() {
                 <h3 className="text-lg font-bold text-white">Playlist Ingestion</h3>
               </div>
               <form onSubmit={handleImport} className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5 border-b border-white/5 pb-3">
+                  <label className="text-xs text-white/60 font-semibold">IPTV-org GitHub Presets</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportName("IPTV-org All Countries");
+                        setImportUrl("https://iptv-org.github.io/iptv/index.country.m3u");
+                      }}
+                      className="bg-white/5 border border-white/10 text-white font-bold py-2 rounded-lg hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all text-[10px] flex items-center justify-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[13px] text-rose-400">public</span>
+                      All Countries
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImportName("IPTV-org All Channels");
+                        setImportUrl("https://iptv-org.github.io/iptv/index.m3u");
+                      }}
+                      className="bg-white/5 border border-white/10 text-white font-bold py-2 rounded-lg hover:bg-white/10 hover:border-white/20 active:scale-95 transition-all text-[10px] flex items-center justify-center gap-1"
+                    >
+                      <span className="material-symbols-outlined text-[13px] text-[#ff3366]">playlist_play</span>
+                      All Channels
+                    </button>
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs text-white/60 font-semibold">Playlist Name</label>
                   <input

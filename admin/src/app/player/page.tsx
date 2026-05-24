@@ -728,7 +728,11 @@ function PlayerPage() {
                     <span className="text-white/40 uppercase font-semibold">Net Bandwidth</span>
                     <span className="text-white font-bold mt-1 font-mono flex items-center gap-1">
                       <span className="material-symbols-outlined text-[12px] text-sky-400">download</span>
-                      {bandwidth !== null ? `${bandwidth} Mbps` : "Caching..."}
+                      {bandwidth !== null 
+                        ? `${bandwidth} Mbps` 
+                        : typeof navigator !== "undefined" && (navigator as any).connection?.downlink
+                        ? `${(navigator as any).connection.downlink} Mbps (Est.)`
+                        : "Caching..."}
                     </span>
                   </div>
                   <div className="flex flex-col">
