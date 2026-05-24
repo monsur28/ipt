@@ -2,8 +2,20 @@ import { FastifyInstance } from 'fastify';
 import { ChannelController } from '../controllers/channel_controller';
 import { PlaylistController } from '../controllers/playlist_controller';
 import { StreamController } from '../controllers/stream_controller';
+import { WebSocketService } from '../services/websocket_service';
+import { LogService } from '../services/log_service';
 
 export default async function apiRoutes(fastify: FastInstance) {
+  // Real-time WebSocket connection
+  fastify.get('/ws', { websocket: true }, (connection, req) => {
+    WebSocketService.registerConnection(connection.socket);
+  });
+
+  // System logs
+  fastify.get('/logs', async (req, reply) => {
+    return reply.send(LogService.getLogs());
+  });
+
   // System metrics overview
   fastify.get('/system/metrics', PlaylistController.getSystemMetrics);
 
@@ -21,6 +33,7 @@ export default async function apiRoutes(fastify: FastInstance) {
   // Playlist imports & status
   fastify.get('/playlists', PlaylistController.getPlaylists);
   fastify.post('/playlists/import', PlaylistController.importPlaylist);
+  fastify.post('/playlist/import', PlaylistController.importPlaylist); // Aligned alias
 
   // Stream source configurations
   fastify.post('/stream-sources', PlaylistController.addStreamSource);
@@ -31,7 +44,9 @@ export default async function apiRoutes(fastify: FastInstance) {
   fastify.get('/stream/:channelId', StreamController.getStreamUrl);
   fastify.get('/stream/:channelId/master.m3u8', StreamController.getStreamUrl);
   fastify.get('/stream/:channelId/status', StreamController.getStreamStatus);
+  fastify.post('/stream/prewarm/:channelId', StreamController.prewarmStream);
   fastify.post('/stream/restart/:channelId', StreamController.restartStream);
+  fastify.post('/channel/restart/:channelId', StreamController.restartStream); // Aligned alias
 }
 
 // FastifyInstance typing helper

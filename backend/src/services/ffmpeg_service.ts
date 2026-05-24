@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import prisma from '../config/db';
 import { CoordinatorService } from './coordinator_service';
+import { LogService } from './log_service';
+import { WebSocketService } from './websocket_service';
 
 interface StreamProcess {
   channelId: string;
@@ -17,7 +19,13 @@ export class FFmpegService {
   private static activeProcesses = new Map<string, StreamProcess>();
   private static HLS_BASE_DIR = path.join(__dirname, '..', '..', 'hls');
   private static IDLE_TIMEOUT_MS = 180 * 1000; // 3 minutes
-  private static startupTimer: NodeJS.Timeout | null = null;
+  private static getFFmpegCommand(): string {
+    const customPath = 'C:\\Users\\monsu\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe';
+    if (fs.existsSync(customPath)) {
+      return customPath;
+    }
+    return process.env.FFMPEG_PATH || 'ffmpeg';
+  }
 
   static init() {
     // Ensure base HLS directory exists
@@ -49,13 +57,13 @@ export class FFmpegService {
     process.on('SIGTERM', () => { process.exit(0); });
   }
 
-  static async startStream(channelId: string, sourceUrl: string): Promise<string> {
+  static async startStream(channelId: string, sourceUrl: string, prewarm = false): Promise<string> {
     this.touchStream(channelId);
 
     // Acquire lock in distributed cluster environment
     const lock = await CoordinatorService.acquireStreamOwnership(channelId);
     if (!lock.success) {
-      console.log(`Lock acquired by another node (${lock.ownerNodeId}) for stream ${channelId}. Routing request.`);
+      LogService.log('INFO', 'Cluster', `Lock acquired by another node (${lock.ownerNodeId}) for stream ${channelId}. Routing request.`);
       const ownerAddr = await CoordinatorService.getOwnerAddress(lock.ownerNodeId);
       if (ownerAddr) {
         // Return full remote cluster node URL path directly
@@ -67,7 +75,9 @@ export class FFmpegService {
     const active = this.activeProcesses.get(channelId);
     if (active) {
       if (active.sourceUrl === sourceUrl) {
-        active.viewers++;
+        if (!prewarm) {
+          active.viewers++;
+        }
         return `/hls/${channelId}/master.m3u8`;
       } else {
         // Source URL changed, stop old stream first
@@ -82,28 +92,42 @@ export class FFmpegService {
 
     const outputPlaylist = path.join(channelOutputDir, 'master.m3u8');
 
-    console.log(`Starting FFmpeg stream process for channel: ${channelId} (URL: ${sourceUrl})`);
+    LogService.log('INFO', 'Transcoder', `Starting FFmpeg HLS stream pipeline for channel ${channelId}`);
 
-    // Input reconnect flags to avoid immediate exit on drop
+    // Input options to allow connection to secured private channels
     const ffmpegArgs = [
-      '-reconnect', '1',
-      '-reconnect_at_eof', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-re',
+      '-tls_verify', '0',
+      '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       '-i', sourceUrl,
       '-c:v', 'copy',
       '-c:a', 'copy',
       '-f', 'hls',
-      '-hls_time', '4',
+      '-hls_time', '2',
       '-hls_list_size', '6',
       '-hls_flags', 'delete_segments+append_list+independent_segments',
       outputPlaylist
     ];
 
-    const child = spawn('ffmpeg', ffmpegArgs, {
-      stdio: 'ignore', // Ignore stdout/stderr to reduce I/O overload
+    const ffmpegCmd = this.getFFmpegCommand();
+    const child = spawn(ffmpegCmd, ffmpegArgs, {
+      stdio: ['ignore', 'ignore', 'pipe'],
       detached: false
+    });
+
+    child.stderr?.on('data', (data) => {
+      console.log(`[FFMPEG-STDERR-${channelId}] ${data.toString().trim()}`);
+    });
+
+    // Handle startup errors (like ENOENT when FFmpeg is not found) to prevent crash
+    child.on('error', (err) => {
+      LogService.log('ERROR', 'Transcoder', `FFmpeg failed to start for channel ${channelId}: ${err.message}`);
+      WebSocketService.broadcast('stream_failure', { channelId, code: 1, signal: err.message });
+      
+      const current = this.activeProcesses.get(channelId);
+      if (current) {
+        this.activeProcesses.delete(channelId);
+        this.cleanupHlsFiles(channelOutputDir);
+      }
     });
 
     const streamProcess: StreamProcess = {
@@ -111,14 +135,20 @@ export class FFmpegService {
       process: child,
       sourceUrl,
       lastAccessed: Date.now(),
-      viewers: 1,
+      viewers: prewarm ? 0 : 1,
       outputDir: channelOutputDir
     };
 
     this.activeProcesses.set(channelId, streamProcess);
 
     child.on('exit', (code, signal) => {
-      console.log(`FFmpeg process for channel ${channelId} exited with code ${code} (signal ${signal})`);
+      LogService.log('WARNING', 'Transcoder', `FFmpeg process for channel ${channelId} exited with code ${code} (signal ${signal})`);
+      
+      // Broadcast stream failure to websocket if exit is abnormal
+      if (code !== 0 && code !== null) {
+        WebSocketService.broadcast('stream_failure', { channelId, code, signal });
+      }
+
       const current = this.activeProcesses.get(channelId);
       if (current && current.process.pid === child.pid) {
         this.activeProcesses.delete(channelId);
@@ -128,10 +158,15 @@ export class FFmpegService {
       }
     });
 
-    // Wait until master.m3u8 playlist file is generated (max 10s wait)
-    const playlistReady = await this.waitForPlaylist(outputPlaylist);
+    if (prewarm) {
+      return `/hls/${channelId}/master.m3u8`;
+    }
+
+    // Wait until master.m3u8 playlist file is generated (max 30s wait)
+    const playlistReady = await this.waitForPlaylist(outputPlaylist, 30000);
     if (!playlistReady) {
-      this.stopStream(channelId);
+      await this.handleStreamFailover(channelId, sourceUrl);
+      await this.stopStream(channelId);
       throw new Error('Timeout waiting for FFmpeg to generate HLS playlist.');
     }
 
@@ -156,13 +191,13 @@ export class FFmpegService {
     const active = this.activeProcesses.get(channelId);
     if (!active) return;
 
-    console.log(`Stopping FFmpeg stream for channel: ${channelId}`);
+    LogService.log('INFO', 'Transcoder', `Stopping FFmpeg stream for channel: ${channelId}`);
     active.process.removeAllListeners('exit');
     
     try {
       active.process.kill('SIGKILL');
     } catch (err) {
-      console.error(`Failed to kill FFmpeg process:`, err);
+      LogService.log('ERROR', 'Transcoder', `Failed to kill FFmpeg process: ${err}`);
     }
 
     await CoordinatorService.releaseStreamOwnership(channelId);
@@ -210,7 +245,7 @@ export class FFmpegService {
     }
   }
 
-  private static waitForPlaylist(playlistPath: string, timeoutMs: number = 10000): Promise<boolean> {
+  private static waitForPlaylist(playlistPath: string, timeoutMs: number = 30000): Promise<boolean> {
     return new Promise((resolve) => {
       const interval = 250;
       let elapsed = 0;
@@ -241,7 +276,7 @@ export class FFmpegService {
     const now = Date.now();
     for (const [channelId, p] of this.activeProcesses) {
       if (p.viewers <= 0 && (now - p.lastAccessed) > this.IDLE_TIMEOUT_MS) {
-        console.log(`Channel ${channelId} has been idle with no viewers for too long. Stopping stream...`);
+        LogService.log('INFO', 'Transcoder', `Channel ${channelId} has been idle with no viewers for too long. Stopping stream...`);
         this.stopStream(channelId);
       }
     }
@@ -249,7 +284,7 @@ export class FFmpegService {
 
   private static async handleStreamFailover(channelId: string, failedUrl: string) {
     try {
-      console.log(`Failover initiated for channel ${channelId} due to failed stream: ${failedUrl}`);
+      LogService.log('WARNING', 'Failover', `Failover initiated for channel ${channelId} due to failed stream: ${failedUrl}`);
 
       // Fetch sources
       const sources = await prisma.streamSource.findMany({
@@ -258,11 +293,12 @@ export class FFmpegService {
       });
 
       if (sources.length <= 1) {
-        console.log(`No fallback stream sources configured for channel ${channelId}. Setting status to OFFLINE.`);
+        LogService.log('ERROR', 'Failover', `No fallback stream sources configured for channel ${channelId}. Setting status to OFFLINE.`);
         await prisma.channel.update({
           where: { id: channelId },
           data: { status: 'OFFLINE' }
         });
+        WebSocketService.broadcast('channel_status', { id: channelId, status: 'OFFLINE' });
         return;
       }
 
@@ -281,7 +317,7 @@ export class FFmpegService {
         .sort((a, b) => a.priority - b.priority)[0];
 
       if (nextSource) {
-        console.log(`Found fallback source (Priority: ${nextSource.priority}) for channel ${channelId}. Activating...`);
+        LogService.log('SUCCESS', 'Failover', `Found fallback source (Priority: ${nextSource.priority}) for channel ${channelId}. Activating...`);
         await prisma.streamSource.update({
           where: { id: nextSource.id },
           data: { isActive: true }
@@ -292,6 +328,7 @@ export class FFmpegService {
           where: { id: channelId },
           data: { status: 'DEGRADED' }
         });
+        WebSocketService.broadcast('channel_status', { id: channelId, status: 'DEGRADED' });
 
         // Log failover switch
         await prisma.healthLog.create({
@@ -306,9 +343,10 @@ export class FFmpegService {
           where: { id: channelId },
           data: { status: 'OFFLINE' }
         });
+        WebSocketService.broadcast('channel_status', { id: channelId, status: 'OFFLINE' });
       }
     } catch (err) {
-      console.error(`Failed to execute failover for channel ${channelId}:`, err);
+      LogService.log('ERROR', 'Failover', `Failed to execute failover for channel ${channelId}: ${err}`);
     }
   }
 }

@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import prisma from '../config/db';
 import { CacheService } from '../services/cache_service';
+import { LogService } from '../services/log_service';
 
 export class ChannelController {
   static async getChannels(req: FastifyRequest, reply: FastifyReply) {
@@ -167,10 +168,11 @@ export class ChannelController {
         data: body,
       });
 
+      LogService.log('INFO', 'AdminAction', `Channel ${updatedChannel.name} (ID: ${id}) updated by admin.`);
       await CacheService.invalidateChannelCache();
       return reply.send(updatedChannel);
     } catch (error) {
-      console.error(`Failed to update channel ${id}:`, error);
+      LogService.log('ERROR', 'AdminAction', `Failed to update channel ${id}: ${error}`);
       return reply.status(500).send({ error: 'Failed to update channel' });
     }
   }
@@ -180,14 +182,15 @@ export class ChannelController {
     const { id } = req.params as { id: string };
 
     try {
-      await prisma.channel.delete({
+      const deletedChannel = await prisma.channel.delete({
         where: { id },
       });
 
+      LogService.log('WARNING', 'AdminAction', `Channel ${deletedChannel.name} (ID: ${id}) deleted by admin.`);
       await CacheService.invalidateChannelCache();
       return reply.send({ success: true, message: 'Channel deleted successfully' });
     } catch (error) {
-      console.error(`Failed to delete channel ${id}:`, error);
+      LogService.log('ERROR', 'AdminAction', `Failed to delete channel ${id}: ${error}`);
       return reply.status(500).send({ error: 'Failed to delete channel' });
     }
   }

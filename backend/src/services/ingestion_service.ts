@@ -3,8 +3,43 @@ import parser from 'iptv-playlist-parser';
 import { StreamSource } from '@prisma/client';
 import prisma from '../config/db';
 import { CacheService } from './cache_service';
+import { LogService } from './log_service';
 
 export class IngestionService {
+  private static isSportsChannel(name: string, groupTitle: string): boolean {
+    const normName = name.toLowerCase();
+    const normGroup = (groupTitle || '').toLowerCase();
+
+    // Comprehensive global sports terms and networks
+    const sportsKeywords = [
+      'sport', 'bein', 'espn', 'arena', 'eurosport', 'skysport', 'supersport', 'bt sport', 
+      'fox sport', 'nbc sport', 'star sport', 'ten sport', 'willow', 'cricket', 'football', 
+      'soccer', 'basketball', 'nba', 'tennis', 'golf', 'fight', 'ufc', 'mma', 'wwe', 'racing', 
+      'moto', 'f1', 'formula 1', 'esport', 'athletics', 'snooker', 'olympic', 'wimbledon', 
+      'laliga', 'premier', 'cric', 'rugby', 'hockey', 'badminton', 'volleyball', 'baseball', 
+      'nfl', 'mlb', 'nhl', 'darts', 'boxing', 'billiard', 'cycling'
+    ];
+
+    // Direct group title validation
+    if (
+      normGroup.includes('sport') || 
+      normGroup.includes('football') || 
+      normGroup.includes('soccer') || 
+      normGroup.includes('cricket') || 
+      normGroup.includes('basketball') || 
+      normGroup.includes('tennis') || 
+      normGroup.includes('racing') || 
+      normGroup.includes('fight') || 
+      normGroup.includes('esport') ||
+      normGroup.includes('athletics')
+    ) {
+      return true;
+    }
+
+    // Direct channel name keyword matching
+    return sportsKeywords.some(keyword => normName.includes(keyword));
+  }
+
   private static autoAssignCategory(name: string, groupTitle: string): string {
     const normName = name.toLowerCase();
     const normGroup = (groupTitle || '').toLowerCase();
@@ -65,22 +100,27 @@ export class IngestionService {
 
   static async importPlaylist(url: string, name: string): Promise<{ success: boolean; importedCount: number; message: string }> {
     try {
-      console.log(`Fetching M3U playlist from: ${url}`);
+      LogService.log('INFO', 'Ingestion', `Fetching M3U playlist from URL: ${url}`);
       const response = await axios.get(url, { timeout: 15000 });
       
       if (!response.data) {
         throw new Error('Playlist content is empty');
       }
 
-      console.log('Parsing M3U playlist...');
+      LogService.log('INFO', 'Ingestion', 'Parsing retrieved M3U contents...');
       const parsed = parser.parse(response.data);
-      console.log(`Parsed ${parsed.items.length} items from M3U.`);
+      LogService.log('INFO', 'Ingestion', `M3U successfully parsed: ${parsed.items.length} items found.`);
 
       let importedCount = 0;
 
       // Wrap in a transaction or iterate and save
       for (const item of parsed.items) {
         if (!item.url || !item.name) continue;
+
+        // Skip non-sports channels to restrict platform strictly to sports
+        if (!this.isSportsChannel(item.name, item.group.title)) {
+          continue;
+        }
 
         const categoryName = this.autoAssignCategory(item.name, item.group.title);
 
@@ -147,13 +187,16 @@ export class IngestionService {
       // Clear cache upon change
       await CacheService.invalidateChannelCache();
 
+      const successMsg = `Successfully processed ${parsed.items.length} items. Imported ${importedCount} new channels.`;
+      LogService.log('SUCCESS', 'Ingestion', successMsg);
+
       return {
         success: true,
         importedCount: importedCount,
-        message: `Successfully processed ${parsed.items.length} items. Imported ${importedCount} new channels.`,
+        message: successMsg,
       };
     } catch (error: any) {
-      console.error('Playlist import failed:', error);
+      LogService.log('ERROR', 'Ingestion', `Playlist import failed: ${error.message || error}`);
       return {
         success: false,
         importedCount: 0,

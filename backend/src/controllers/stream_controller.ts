@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import prisma from '../config/db';
 import { FFmpegService } from '../services/ffmpeg_service';
+import { LogService } from '../services/log_service';
 
 interface StreamSource {
   id: string;
@@ -133,10 +134,11 @@ export class StreamController {
         return reply.status(404).send({ error: 'Channel not found' });
       }
 
-      console.log(`Manual restart requested for channel: ${channelId}`);
+      LogService.log('WARNING', 'AdminAction', `Manual transcode pipeline restart requested for ${channel.name} (ID: ${channelId})`);
       await FFmpegService.stopStream(channelId);
 
       if (channel.streamSources.length === 0) {
+        LogService.log('ERROR', 'AdminAction', `No stream sources to start for channel ${channelId}`);
         return reply.status(400).send({ error: 'No stream sources to start' });
       }
 
@@ -144,6 +146,7 @@ export class StreamController {
                      [...channel.streamSources].sort((a: StreamSource, b: StreamSource) => a.priority - b.priority)[0];
 
       const localHlsPath = await FFmpegService.startStream(channelId, source.url);
+      LogService.log('SUCCESS', 'AdminAction', `Transcode pipeline restarted successfully for ${channel.name} (ID: ${channelId})`);
 
       return reply.send({
         success: true,
@@ -151,8 +154,50 @@ export class StreamController {
         streamUrl: localHlsPath
       });
     } catch (error: any) {
-      console.error(`Failed to restart stream for channel ${channelId}:`, error);
+      LogService.log('ERROR', 'AdminAction', `Failed to restart stream for channel ${channelId}: ${error.message || error}`);
       return reply.status(500).send({ error: 'Failed to restart stream', details: error.message });
+    }
+  }
+
+  static async prewarmStream(req: FastifyRequest, reply: FastifyReply) {
+    const { channelId } = req.params as { channelId: string };
+
+    try {
+      const channel = await prisma.channel.findUnique({
+        where: { id: channelId },
+        include: { streamSources: true }
+      });
+
+      if (!channel) {
+        return reply.status(404).send({ error: 'Channel not found' });
+      }
+
+      if (channel.streamSources.length === 0) {
+        return reply.status(404).send({ error: 'No stream sources configured for this channel' });
+      }
+
+      const activeStreams = FFmpegService.getActiveStreams();
+      const processInfo = activeStreams.find((s: any) => s.channelId === channelId);
+
+      if (processInfo) {
+        // Stream already running or pre-warmed
+        return reply.send({ success: true, message: 'Stream already active or pre-warmed.' });
+      }
+
+      const source = channel.streamSources.find((s: StreamSource) => s.isActive) ||
+                     [...channel.streamSources].sort((a: StreamSource, b: StreamSource) => a.priority - b.priority)[0];
+
+      // Trigger asynchronous background pre-warming process (prewarm = true)
+      FFmpegService.startStream(channelId, source.url, true).catch(err => {
+        console.error(`Failed to prewarm stream for channel ${channelId}:`, err);
+      });
+
+      return reply.send({
+        success: true,
+        message: 'Stream pre-warming initiated successfully.'
+      });
+    } catch (error: any) {
+      return reply.status(500).send({ error: 'Failed to pre-warm stream', details: error.message });
     }
   }
 }
