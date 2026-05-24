@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import prisma from '../config/db';
 import { FFmpegService } from '../services/ffmpeg_service';
 import { LogService } from '../services/log_service';
+import { WebSocketService } from '../services/websocket_service';
 
 interface StreamSource {
   id: string;
@@ -41,6 +42,12 @@ export class StreamController {
         localHlsPath = await FFmpegService.startStream(channelId, source.url);
       } catch (err: any) {
         console.error(`Failed to start FFmpeg worker for channel ${channelId}:`, err);
+        // Set channel status to OFFLINE immediately in the database and broadcast it
+        await prisma.channel.update({
+          where: { id: channelId },
+          data: { status: 'OFFLINE' }
+        }).catch(() => {});
+        WebSocketService.broadcast('channel_status', { id: channelId, status: 'OFFLINE' });
         return reply.status(500).send({ error: 'Failed to initialize stream worker.', details: err.message });
       }
 

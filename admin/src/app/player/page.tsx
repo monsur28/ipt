@@ -87,7 +87,7 @@ function PlayerPage() {
     const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           c.categoryName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === "all" || c.categoryName === selectedCategory;
-    const isOnline = getChannelStatus(c) === "ONLINE";
+    const isOnline = getChannelStatus(c) !== "OFFLINE";
     return matchesSearch && matchesCategory && isOnline;
   });
 
