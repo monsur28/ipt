@@ -4,6 +4,7 @@ import { StreamSource } from '@prisma/client';
 import prisma from '../config/db';
 import { CacheService } from './cache_service';
 import { LogService } from './log_service';
+import { HealthCheckService } from './health_check_service';
 
 export class IngestionService {
   private static isSportsChannel(name: string, groupTitle: string): boolean {
@@ -186,6 +187,11 @@ export class IngestionService {
 
       // Clear cache upon change
       await CacheService.invalidateChannelCache();
+
+      // Trigger parallel stream health checks immediately in background
+      HealthCheckService.runHealthChecks().catch((err) => {
+        console.error('Failed to trigger background post-import health checks:', err);
+      });
 
       const successMsg = `Successfully processed ${parsed.items.length} items. Imported ${importedCount} new channels.`;
       LogService.log('SUCCESS', 'Ingestion', successMsg);
