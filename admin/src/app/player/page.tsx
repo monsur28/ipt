@@ -36,36 +36,20 @@ function PlayerPage() {
   const hlsRef = useRef<Hls | null>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
 
-  // Mouse Drag-to-Scroll support for categories horizontal pills container
-  const categoriesScrollRef = useRef<HTMLDivElement>(null);
-  const [isDragScrolling, setIsDragScrolling] = useState(false);
-  const [dragStartX, setDragStartX] = useState(0);
-  const [dragScrollLeft, setDragScrollLeft] = useState(0);
+  // Advanced searchable category dropdown select
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+  const [categorySearchQuery, setCategorySearchQuery] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const handleCategoriesMouseDown = (e: React.MouseEvent) => {
-    const el = categoriesScrollRef.current;
-    if (!el) return;
-    setIsDragScrolling(true);
-    setDragStartX(e.pageX - el.offsetLeft);
-    setDragScrollLeft(el.scrollLeft);
-  };
-
-  const handleCategoriesMouseLeave = () => {
-    setIsDragScrolling(false);
-  };
-
-  const handleCategoriesMouseUp = () => {
-    setIsDragScrolling(false);
-  };
-
-  const handleCategoriesMouseMove = (e: React.MouseEvent) => {
-    const el = categoriesScrollRef.current;
-    if (!el || !isDragScrolling) return;
-    e.preventDefault();
-    const x = e.pageX - el.offsetLeft;
-    const walk = (x - dragStartX) * 1.5; // scrolling speed multiplier
-    el.scrollLeft = dragScrollLeft - walk;
-  };
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsCategoryDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -434,38 +418,91 @@ function PlayerPage() {
               />
             </div>
 
-            {/* Category horizontal scrolling pills */}
-            <div 
-              ref={categoriesScrollRef}
-              onMouseDown={handleCategoriesMouseDown}
-              onMouseLeave={handleCategoriesMouseLeave}
-              onMouseUp={handleCategoriesMouseUp}
-              onMouseMove={handleCategoriesMouseMove}
-              className="flex gap-1.5 overflow-x-auto pb-1.5 w-full max-w-[288px] custom-h-scrollbar select-none cursor-grab active:cursor-grabbing"
-            >
+            {/* Advanced Searchable Category / Country Dropdown selector */}
+            <div className="relative animate-in fade-in duration-300" ref={dropdownRef}>
+              <label className="text-[10px] text-white/40 uppercase font-bold tracking-wider mb-1 block">
+                Filter by Category / Country
+              </label>
               <button
-                onClick={() => setSelectedCategory("all")}
-                className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-wide transition-all shrink-0 ${
-                  selectedCategory === "all"
-                    ? "bg-[#ff3366] text-white"
-                    : "bg-white/5 hover:bg-white/10 text-white/60 hover:text-white"
-                }`}
+                type="button"
+                onClick={() => {
+                  setIsCategoryDropdownOpen(!isCategoryDropdownOpen);
+                  setCategorySearchQuery("");
+                }}
+                className="w-full bg-black/40 border border-white/10 hover:border-white/20 rounded-lg py-2 px-3 text-xs text-white flex justify-between items-center transition-all select-none cursor-pointer"
               >
-                ALL
+                <span className="font-semibold uppercase tracking-wide truncate max-w-[200px]">
+                  {selectedCategory === "all" ? "🌐 All Countries / Categories" : `🚩 ${selectedCategory}`}
+                </span>
+                <span className="material-symbols-outlined text-white/40 text-sm transition-transform duration-200" style={{
+                  transform: isCategoryDropdownOpen ? "rotate(180deg)" : "rotate(0deg)"
+                }}>
+                  keyboard_arrow_down
+                </span>
               </button>
-              {categories.map((cat) => (
-                <button
-                  key={cat.slug}
-                  onClick={() => setSelectedCategory(cat.name)}
-                  className={`px-3 py-1 rounded-full text-[10px] font-bold tracking-wide transition-all shrink-0 uppercase ${
-                    selectedCategory === cat.name
-                      ? "bg-[#ff3366] text-white"
-                      : "bg-white/5 hover:bg-white/10 text-white/60 hover:text-white"
-                  }`}
-                >
-                  {cat.name}
-                </button>
-              ))}
+
+              {isCategoryDropdownOpen && (
+                <div className="absolute top-[calc(100%+6px)] left-0 right-0 bg-[#0c1427] border border-white/10 rounded-xl shadow-2xl z-50 p-2 flex flex-col gap-2 backdrop-blur-xl animate-in fade-in slide-in-from-top-1 duration-150">
+                  {/* Dropdown inner search input */}
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-2.5 top-2 text-white/30 text-base">search</span>
+                    <input
+                      type="text"
+                      placeholder="Type country or category..."
+                      className="w-full bg-black/50 border border-white/5 rounded-lg py-1.5 pl-8 pr-3 text-[11px] focus:outline-none focus:ring-1 focus:ring-[#ff3366] text-white"
+                      value={categorySearchQuery}
+                      onChange={(e) => setCategorySearchQuery(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Dropdown categories list */}
+                  <div className="flex flex-col gap-1 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory("all");
+                        setIsCategoryDropdownOpen(false);
+                      }}
+                      className={`w-full text-left py-1.5 px-2.5 rounded-md text-[11px] font-bold transition-all flex items-center justify-between select-none ${
+                        selectedCategory === "all"
+                          ? "bg-[#ff3366] text-white"
+                          : "hover:bg-white/5 text-white/70 hover:text-white"
+                      }`}
+                    >
+                      <span>🌐 ALL COUNTRIES</span>
+                      {selectedCategory === "all" && <span className="material-symbols-outlined text-xs">check</span>}
+                    </button>
+                    
+                    {categories
+                      .filter((cat) => cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase()))
+                      .map((cat) => (
+                        <button
+                          key={cat.slug}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory(cat.name);
+                            setIsCategoryDropdownOpen(false);
+                          }}
+                          className={`w-full text-left py-1.5 px-2.5 rounded-md text-[11px] font-bold transition-all flex items-center justify-between uppercase select-none ${
+                            selectedCategory === cat.name
+                              ? "bg-[#ff3366] text-white"
+                              : "hover:bg-white/5 text-white/70 hover:text-white"
+                          }`}
+                        >
+                          <span className="truncate max-w-[200px]">🚩 {cat.name}</span>
+                          {selectedCategory === cat.name && <span className="material-symbols-outlined text-xs">check</span>}
+                        </button>
+                      ))}
+
+                    {categories.filter((cat) => cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase())).length === 0 && (
+                      <div className="text-[10px] text-white/30 text-center py-4 italic">
+                        No matches found
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
