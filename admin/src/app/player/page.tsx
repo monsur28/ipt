@@ -55,23 +55,39 @@ function PlayerPage() {
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-  // Fetch categories
+  // Fetch categories (with localStorage cache)
   const { data: categories = [] } = useQuery<Category[]>({
     queryKey: ["categories"],
     queryFn: async () => {
       const res = await fetch(`${apiUrl}/api/categories`);
       if (!res.ok) throw new Error("Failed to load categories");
-      return res.json();
+      const data = await res.json();
+      try { localStorage.setItem("iptv_categories_cache", JSON.stringify(data)); } catch {}
+      return data;
+    },
+    initialData: () => {
+      try {
+        const cached = localStorage.getItem("iptv_categories_cache");
+        return cached ? JSON.parse(cached) : undefined;
+      } catch { return undefined; }
     },
   });
 
-  // Fetch channels
+  // Fetch channels (with localStorage cache)
   const { data: channelsData, isLoading: isLoadingChannels } = useQuery({
     queryKey: ["channels"],
     queryFn: async () => {
       const res = await fetch(`${apiUrl}/api/channels?limit=1000`);
       if (!res.ok) throw new Error("Failed to load channels");
-      return res.json();
+      const data = await res.json();
+      try { localStorage.setItem("iptv_channels_cache", JSON.stringify(data)); } catch {}
+      return data;
+    },
+    initialData: () => {
+      try {
+        const cached = localStorage.getItem("iptv_channels_cache");
+        return cached ? JSON.parse(cached) : undefined;
+      } catch { return undefined; }
     },
   });
 
