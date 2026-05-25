@@ -170,9 +170,15 @@ function PlayerPage() {
       hlsRef.current = null;
     }
 
+    const MAX_RETRIES = 5;
+    const getRetryDelay = (retry: number) => Math.min(2000 * Math.pow(2, retry), 15000);
+
     const initHlsPlayer = async (currentRetry = 0) => {
       try {
         setIsBuffering(true);
+        if (currentRetry > 0) {
+          setPlaybackError(`Connecting to stream... attempt ${currentRetry + 1}/${MAX_RETRIES + 1}`);
+        }
         // 1. Fetch direct HLS stream URL from secure backend proxy
         const res = await fetch(`${apiUrl}/api/stream/${channel.id}?json=true`);
         if (!res.ok) {
@@ -187,6 +193,7 @@ function PlayerPage() {
 
         const realStreamUrl = data.streamUrl;
         console.log(`[PLAYER] Loading secure stream URL: ${realStreamUrl}`);
+        setPlaybackError(null);
 
         if (!videoRef.current) return;
 
@@ -266,20 +273,21 @@ function PlayerPage() {
               console.error("Fatal HLS Error:", errorData.type, errorData.details);
               setIsBuffering(false);
 
-              if (currentRetry < 2) {
+              if (currentRetry < MAX_RETRIES) {
                 const nextRetry = currentRetry + 1;
                 setRetryCount(nextRetry);
-                setPlaybackError(`Fatal HLS playback error. Retrying connection (${nextRetry}/2)...`);
+                const delay = getRetryDelay(currentRetry);
+                setPlaybackError(`Stream error (${errorData.details}). Reconnecting (${nextRetry}/${MAX_RETRIES})... retry in ${Math.round(delay / 1000)}s`);
                 setTimeout(() => {
                   if (hlsRef.current === hls) {
                     hls.destroy();
                     hlsRef.current = null;
                   }
                   initHlsPlayer(nextRetry);
-                }, 3000);
+                }, delay);
               } else {
                 setPlaybackError(
-                  "Channel stream failed to load. The stream source is offline or FFmpeg transcoding encountered a critical error. Please try restarting the stream from the delivery dashboard."
+                  "Stream unavailable — the source may be offline or the server is still warming up. Try clicking 'Retry' below, or select a different channel."
                 );
                 hls.destroy();
                 hlsRef.current = null;
@@ -304,15 +312,16 @@ function PlayerPage() {
           
           const handleNativeError = () => {
             setIsBuffering(false);
-            if (currentRetry < 2) {
+            if (currentRetry < MAX_RETRIES) {
               const nextRetry = currentRetry + 1;
               setRetryCount(nextRetry);
-              setPlaybackError(`Native playback error. Retrying connection (${nextRetry}/2)...`);
+              const delay = getRetryDelay(currentRetry);
+              setPlaybackError(`Native playback error. Reconnecting (${nextRetry}/${MAX_RETRIES})...`);
               setTimeout(() => {
                 initHlsPlayer(nextRetry);
-              }, 3000);
+              }, delay);
             } else {
-              setPlaybackError("Native playback failed. The stream might be offline.");
+              setPlaybackError("Native playback failed. The stream source may be offline or unreachable.");
             }
           };
 
@@ -324,15 +333,16 @@ function PlayerPage() {
       } catch (err: any) {
         console.error("[PLAYER] Stream initialization error:", err);
         setIsBuffering(false);
-        if (currentRetry < 2) {
+        if (currentRetry < MAX_RETRIES) {
           const nextRetry = currentRetry + 1;
           setRetryCount(nextRetry);
-          setPlaybackError(`Failed to initiate restream worker. Retrying (${nextRetry}/2)...`);
+          const delay = getRetryDelay(currentRetry);
+          setPlaybackError(`Server busy or waking up. Reconnecting (${nextRetry}/${MAX_RETRIES})... retry in ${Math.round(delay / 1000)}s`);
           setTimeout(() => {
             initHlsPlayer(nextRetry);
-          }, 3000);
+          }, delay);
         } else {
-          setPlaybackError(err.message || "Failed to initialize stream worker.");
+          setPlaybackError("Stream server is not responding. It may be in cold-start mode — wait a moment and click 'Retry', or try a different channel.");
         }
       }
     };
@@ -612,7 +622,12 @@ function PlayerPage() {
                 {isBuffering && !playbackError && (
                   <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex flex-col items-center justify-center gap-3 transition-opacity">
                     <span className="material-symbols-outlined text-4xl text-[#ff3366] animate-spin">sync</span>
-                    <span className="text-xs tracking-wider font-semibold text-white">BUFFERING SECURE STREAM...</span>
+                    <span className="text-xs tracking-wider font-semibold text-white">
+                      {retryCount > 0 ? `RECONNECTING (ATTEMPT ${retryCount + 1})...` : 'BUFFERING SECURE STREAM...'}
+                    </span>
+                    {retryCount > 0 && (
+                      <span className="text-[10px] text-white/50">Server may be waking up — this can take up to 30s</span>
+                    )}
                   </div>
                 )}
 
